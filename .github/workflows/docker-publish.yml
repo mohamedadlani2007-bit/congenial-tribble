@@ -78,6 +78,7 @@ jobs:
           push: true
           tags: |
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/blessvless:v1
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/blessvless:v2
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/blessvless:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
