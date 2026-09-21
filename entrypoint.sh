@@ -2,10 +2,17 @@
 set -eu
 
 : "${PORT:=8080}"
+: "${APP_PORT:=8000}"
+: "${XRAY_PORT:=10000}"
 : "${WS_PATH:=/_vless}"
 
 if [ -z "${VLESS_UUID:-}" ]; then
   echo "VLESS_UUID is required" >&2
+  exit 1
+fi
+
+if [ -z "${ADMIN_PASSWORD:-}" ]; then
+  echo "ADMIN_PASSWORD is required" >&2
   exit 1
 fi
 
@@ -21,8 +28,16 @@ esac
 
 sed \
   -e "s|__VLESS_UUID__|$VLESS_UUID|g" \
-  -e "s|__PORT__|$PORT|g" \
+  -e "s|__PORT__|$XRAY_PORT|g" \
   -e "s|__WS_PATH__|$WS_PATH|g" \
   /etc/xray/config.template.json > /tmp/config.json
 
-exec /opt/xray/xray run -config /tmp/config.json
+/opt/xray/xray run -config /tmp/config.json &
+XRAY_PID=$!
+python3 /app/bot.py &
+BOT_PID=$!
+nginx -g 'daemon off;' &
+NGINX_PID=$!
+
+trap 'kill "$XRAY_PID" "$BOT_PID" "$NGINX_PID" 2>/dev/null || true' INT TERM EXIT
+wait "$NGINX_PID"

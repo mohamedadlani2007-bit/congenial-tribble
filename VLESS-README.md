@@ -103,3 +103,21 @@ PROJECT_ID="PROJECT_ID" REGION="europe-west1" SERVICE="vless" ./deploy-cloudrun-
 printf '%s' 'UUID-الجديد' | gcloud secrets versions add vless-uuid --data-file=-
 gcloud run services update vless --region europe-west1 --update-secrets VLESS_UUID=vless-uuid:latest
 ```
+
+## تدفق بوت Telegram
+
+بعد تشغيل الحاوية، افتح الدومين في المتصفح. ستظهر صفحة إعداد بوت VLESS. أدخل `ADMIN_PASSWORD`، ثم توكن البوت والدومين و`Admin Chat ID` اختياريًا. التوكن يُستخدم في ذاكرة العملية ولا يظهر في الصفحة أو السجلات؛ في الإنتاج الأفضل تمريره من Secret Manager عبر `TELEGRAM_BOT_TOKEN` بدل إدخاله من الصفحة.
+
+بعد التفعيل، افتح البوت في Telegram واستعمل `/vless` لإرسال رابط VLESS، أو `/status` لعرض الحالة، أو `/help` لعرض الأوامر. المشروع الآن لا يشغّل SSH ولا Dropbear ولا يرسل SSH payload؛ Nginx يمرر مسار `/_vless` إلى Xray، ويمرر لوحة الإعداد إلى التطبيق الداخلي.
+
+للتشغيل يجب توفير `ADMIN_PASSWORD` و`VLESS_UUID`. مثال Cloud Run:
+
+```bash
+gcloud run deploy vless \
+  --image docker.io/knhfdsjj/blessvless:v1 \
+  --port 8080 \
+  --allow-unauthenticated \
+  --timeout 3600 \
+  --set-env-vars "DOMAIN=vless.example.com,WS_PATH=/_vless" \
+  --set-secrets "ADMIN_PASSWORD=admin-password:latest,VLESS_UUID=vless-uuid:latest"
+```
