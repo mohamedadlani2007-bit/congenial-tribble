@@ -1,168 +1,102 @@
 #!/usr/bin/env python3
-import html
-import json
-import os
-import threading
-import time
-import urllib.parse
-import urllib.request
-import uuid
+import html, json, os, threading, time, urllib.parse, urllib.request, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.getenv("APP_PORT", "8000"))
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 DOMAIN = os.getenv("DOMAIN", "")
-WS_PATH = os.getenv("WS_PATH", "/_vless")
+WS_PATH = os.getenv("WS_PATH", "/_mohalamia")
 ADMIN_CHAT_ID = str(os.getenv("ADMIN_CHAT_ID", "")).strip()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 DATA_DIR = os.getenv("DATA_DIR", "/tmp/vless-data")
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
 LOCK = threading.RLock()
+USERS = {}
 BOT_THREAD = None
-STOP = threading.Event()
 
 
 def load_users():
-    os.makedirs(DATA_DIR, exist_ok=True)
+    global USERS
     try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            value = json.load(f)
-            return value if isinstance(value, dict) else {}
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-USERS = load_users()
+        with open(USERS_FILE, encoding="utf-8") as f: USERS = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError): USERS = {}
 
 
 def save_users():
     os.makedirs(DATA_DIR, exist_ok=True)
     tmp = USERS_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(USERS, f, ensure_ascii=False, indent=2)
+    with open(tmp, "w", encoding="utf-8") as f: json.dump(USERS, f)
     os.replace(tmp, USERS_FILE)
 
 
-def get_user_uuid(chat_id):
+def user_uuid(chat_id):
     key = str(chat_id)
     with LOCK:
         if key not in USERS:
-            USERS[key] = {"uuid": str(uuid.uuid4()), "created_at": int(time.time())}
+            USERS[key] = {"uuid": str(uuid.uuid4()), "created": int(time.time())}
             save_users()
         return USERS[key]["uuid"]
 
 
-def vless_uri(user_uuid):
-    host = DOMAIN.strip().replace("https://", "").replace("http://", "").split("/", 1)[0]
-    query = urllib.parse.urlencode({
-        "encryption": "none", "security": "tls", "type": "ws",
-        "host": host, "path": WS_PATH, "sni": host,
-    })
-    return f"vless://{user_uuid}@{host}:443?{query}#VLESS-{user_uuid[:8]}"
+def link(uid):
+    host = DOMAIN.replace("https://", "").replace("http://", "").split("/", 1)[0]
+    q = urllib.parse.urlencode({"encryption":"none", "security":"tls", "type":"ws", "host":host, "sni":host, "path":WS_PATH})
+    return f"vless://{uid}@{host}:443?{q}#VLESS-{uid[:8]}"
 
 
-def telegram(method, payload=None):
-    if not BOT_TOKEN:
-        return {}
-    req = urllib.request.Request(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/{method}",
-        data=json.dumps(payload or {}).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=35) as response:
-        return json.loads(response.read().decode())
+def api(method, payload):
+    if not BOT_TOKEN: return {}
+    req = urllib.request.Request(f"https://api.telegram.org/bot{BOT_TOKEN}/{method}", data=json.dumps(payload).encode(), headers={"Content-Type":"application/json"})
+    with urllib.request.urlopen(req, timeout=35) as r: return json.loads(r.read())
 
 
-def send(chat_id, text):
-    telegram("sendMessage", {"chat_id": chat_id, "text": text, "disable_web_page_preview": True})
+def send(chat, text): api("sendMessage", {"chat_id":chat, "text":text, "disable_web_page_preview":True})
 
 
 def bot_loop():
     offset = 0
-    while not STOP.is_set():
+    while True:
         try:
-            result = telegram("getUpdates", {"timeout": 25, "offset": offset})
-            for update in result.get("result", []):
-                offset = update["update_id"] + 1
-                message = update.get("message", {})
-                chat_id = message.get("chat", {}).get("id")
-                text = (message.get("text") or "").strip()
-                if not chat_id:
-                    continue
-                if text in ("/start", "/help", "مساعدة"):
-                    send(chat_id, "أهلًا. استعمل /vless للحصول على رابطك الخاص، أو /status للحالة.")
+            for upd in api("getUpdates", {"timeout":25, "offset":offset}).get("result", []):
+                offset = upd["update_id"] + 1
+                msg = upd.get("message", {}); chat = msg.get("chat", {}).get("id"); text = (msg.get("text") or "").strip()
+                if not chat: continue
+                if text in ("/start", "/help"):
+                    send(chat, "أهلًا. أرسل /vless للحصول على رابطك الخاص أو /new لتجديده.")
                 elif text in ("/vless", "الرابط"):
-                    if not DOMAIN:
-                        send(chat_id, "الدومين غير مضبوط بعد.")
-                    else:
-                        user_uuid = get_user_uuid(chat_id)
-                        send(chat_id, "رابط VLESS الخاص بك (UUID مستقل):\n\n" + vless_uri(user_uuid))
+                    send(chat, "رابط VLESS الخاص بك:\n\n" + link(user_uuid(chat)) if DOMAIN else "الدومين غير مضبوط.")
                 elif text in ("/new", "/renew"):
-                    with LOCK:
-                        USERS[str(chat_id)] = {"uuid": str(uuid.uuid4()), "created_at": int(time.time())}
-                        save_users()
-                    send(chat_id, "تم إنشاء UUID جديد لك. أرسل /vless للحصول على الرابط الجديد.")
-                elif text in ("/status", "الحالة"):
-                    send(chat_id, f"الخدمة: VLESS WebSocket\nالدومين: {DOMAIN or 'غير مضبوط'}\nالمسار: {WS_PATH}\nالمستخدمون: {len(USERS)}")
-                elif ADMIN_CHAT_ID and str(chat_id) == ADMIN_CHAT_ID and text == "/users":
-                    send(chat_id, f"عدد المستخدمين المسجلين: {len(USERS)}")
-                else:
-                    send(chat_id, "الأوامر: /vless للحصول على رابطك، /new لتجديد UUID، /status للحالة.")
-        except Exception as exc:
-            print(f"telegram loop error: {exc}", flush=True)
-            time.sleep(5)
+                    with LOCK: USERS[str(chat)] = {"uuid":str(uuid.uuid4()), "created":int(time.time())}; save_users()
+                    send(chat, "تم تجديد UUID. أرسل /vless.")
+                elif text == "/status": send(chat, f"VLESS WebSocket\nالدومين: {DOMAIN}\nالمسار: {WS_PATH}\nالمستخدمون: {len(USERS)}")
+                else: send(chat, "الأوامر: /vless و /new و /status")
+        except Exception as e:
+            print(f"telegram: {e}", flush=True); time.sleep(5)
 
 
 def start_bot(token):
     global BOT_TOKEN, BOT_THREAD
-    with LOCK:
-        BOT_TOKEN = token.strip()
-        if BOT_THREAD and BOT_THREAD.is_alive():
-            return
-        STOP.clear()
-        BOT_THREAD = threading.Thread(target=bot_loop, daemon=True)
-        BOT_THREAD.start()
+    BOT_TOKEN = token.strip()
+    if not BOT_THREAD or not BOT_THREAD.is_alive(): BOT_THREAD = threading.Thread(target=bot_loop, daemon=True); BOT_THREAD.start()
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *_args):
-        return
-
-    def response(self, status, body, content_type="text/html; charset=utf-8"):
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body.encode())
-
+    def log_message(self, *_): pass
+    def out(self, code, body, typ="text/html; charset=utf-8"):
+        self.send_response(code); self.send_header("Content-Type", typ); self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(body.encode())
     def do_GET(self):
-        if self.path == "/health":
-            self.response(200, "ok", "text/plain; charset=utf-8")
-            return
-        body = f"""<!doctype html><html lang='ar' dir='rtl'><meta charset='utf-8'><title>VLESS Bot</title>
-<style>body{{font-family:Arial;max-width:560px;margin:50px auto;padding:20px;background:#f5f5f5}}main{{background:#fff;padding:24px;border-radius:12px}}input{{width:100%;padding:11px;margin:7px 0 15px;box-sizing:border-box}}button{{padding:11px 22px;background:#1769aa;color:#fff;border:0;border-radius:6px}}</style>
-<main><h2>إعداد بوت VLESS</h2><p>كل مستخدم يحصل على UUID مستقل. أدخل كلمة سر الإدارة وتوكن Telegram.</p>
-<form method='POST'><label>كلمة سر الإدارة</label><input name='password' type='password' required><label>Telegram Bot Token</label><input name='token' type='password' required><label>الدومين</label><input name='domain' value='{html.escape(DOMAIN)}' placeholder='vless.example.com' required><label>Admin Chat ID اختياري</label><input name='chat_id' value='{html.escape(ADMIN_CHAT_ID)}'><button>تفعيل البوت</button></form></main></html>"""
-        self.response(200, body)
-
+        if self.path == "/health": return self.out(200, "ok", "text/plain")
+        self.out(200, f"""<!doctype html><html lang='ar' dir='rtl'><meta charset='utf-8'><style>body{{font-family:Arial;max-width:560px;margin:45px auto;padding:20px;background:#f4f4f4}}main{{background:white;padding:25px;border-radius:12px}}input{{width:100%;padding:12px;margin:7px 0 15px;box-sizing:border-box}}button{{padding:12px 22px;background:#1769aa;color:white;border:0;border-radius:6px}}</style><main><h2>إعداد VLESS Bot</h2><p>نفس تدفق المشروع الأصلي، لكن الرابط الناتج VLESS.</p><form method='POST'><label>كلمة سر الإدارة</label><input name='password' type='password' required><label>Telegram Bot Token</label><input name='token' type='password' required><label>الدومين</label><input name='domain' value='{html.escape(DOMAIN)}' required><label>Admin Chat ID اختياري</label><input name='chat_id' value='{html.escape(ADMIN_CHAT_ID)}'><button>تفعيل البوت</button></form></main></html>""")
     def do_POST(self):
-        length = int(self.headers.get("Content-Length", "0"))
-        data = urllib.parse.parse_qs(self.rfile.read(length).decode())
-        if not ADMIN_PASSWORD or data.get("password", [""])[0] != ADMIN_PASSWORD:
-            self.response(403, "كلمة السر غير صحيحة", "text/plain; charset=utf-8")
-            return
+        n=int(self.headers.get("Content-Length",0)); d=urllib.parse.parse_qs(self.rfile.read(n).decode())
+        if not ADMIN_PASSWORD or d.get("password",[""])[0] != ADMIN_PASSWORD: return self.out(403,"كلمة السر غير صحيحة","text/plain")
         global DOMAIN, ADMIN_CHAT_ID
-        DOMAIN = data.get("domain", [""])[0].strip()
-        ADMIN_CHAT_ID = data.get("chat_id", [""])[0].strip()
-        token = data.get("token", [""])[0].strip()
-        if not token or not DOMAIN:
-            self.response(400, "البيانات ناقصة", "text/plain; charset=utf-8")
-            return
-        start_bot(token)
-        self.response(200, "تم تفعيل البوت. أرسل /vless للبوت للحصول على UUID خاص بك.", "text/plain; charset=utf-8")
+        DOMAIN=d.get("domain",[""])[0].strip(); ADMIN_CHAT_ID=d.get("chat_id",[""])[0].strip(); token=d.get("token",[""])[0].strip()
+        if not DOMAIN or not token: return self.out(400,"البيانات ناقصة","text/plain")
+        start_bot(token); self.out(200,"تم تفعيل البوت. أرسل /vless للحصول على رابطك.","text/plain")
 
 
 if __name__ == "__main__":
-    if BOT_TOKEN:
-        start_bot(BOT_TOKEN)
+    load_users()
+    if BOT_TOKEN: start_bot(BOT_TOKEN)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

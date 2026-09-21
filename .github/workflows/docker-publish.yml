@@ -12,39 +12,29 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Build smoke-test image
         run: docker build --tag blessvless:smoke .
-
-      - name: Start direct VLESS container
+      - name: Start VLESS bot container
         run: |
-          docker run --detach --name blessvless-smoke --publish 18080:8080 blessvless:smoke
-
-      - name: Verify V2Ray listener on port 8080
+          docker run --detach --name blessvless-smoke --publish 18080:8080 \
+            --env VLESS_UUID=123e4567-e89b-12d3-a456-426614174000 \
+            --env ADMIN_PASSWORD=test-only \
+            blessvless:smoke
+      - name: Verify Cloud Run listener and setup page
         run: |
           for i in $(seq 1 30); do
-            if curl --silent --show-error --max-time 3 \
-              --header 'Connection: Upgrade' \
-              --header 'Upgrade: websocket' \
-              http://127.0.0.1:18080/mohamedalmia >/tmp/vless-response 2>/tmp/vless-error; then
+            if curl --silent --fail http://127.0.0.1:18080/health >/dev/null && \
+               curl --silent --fail http://127.0.0.1:18080/ | grep -q 'إعداد VLESS Bot'; then
               exit 0
-            fi
-            if ! docker inspect -f '{{.State.Running}}' blessvless-smoke | grep -q true; then
-              docker logs blessvless-smoke
-              exit 1
             fi
             sleep 2
           done
           docker logs blessvless-smoke
-          cat /tmp/vless-error || true
           exit 1
-
-      - name: Show container logs on failure
+      - name: Show logs on failure
         if: failure()
         run: docker logs blessvless-smoke
-
       - name: Remove smoke-test container
         if: always()
         run: docker rm --force blessvless-smoke || true
@@ -54,18 +44,12 @@ jobs:
     environment: DOCKERHUB_TOKEN
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Build and push blessvless
         uses: docker/build-push-action@v6
         with:
