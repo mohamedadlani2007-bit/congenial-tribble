@@ -121,3 +121,23 @@ gcloud run deploy vless \
   --set-env-vars "DOMAIN=vless.example.com,WS_PATH=/_vless" \
   --set-secrets "ADMIN_PASSWORD=admin-password:latest,VLESS_UUID=vless-uuid:latest"
 ```
+
+## نشر صورة Docker تلقائيًا من GitHub
+
+أضفت Workflow في `.github/workflows/docker-publish.yml`. عند كل دفع إلى `main`، يبني GitHub الصورة ويرفعها إلى Docker Hub بالوسمين `v1` و`latest`.
+
+من صفحة المستودع افتح **Settings → Secrets and variables → Actions → New repository secret** وأنشئ:
+
+| الاسم | القيمة |
+|---|---|
+| `DOCKERHUB_USERNAME` | `knhfdsjj` |
+| `DOCKERHUB_TOKEN` | Docker Hub Access Token، وليس كلمة مرور الحساب |
+
+بعد حفظ الأسرار، شغّل Workflow من تبويب **Actions** عبر **Build and publish Docker image → Run workflow**، أو ادفع أي Commit إلى `main`. الصورة الناتجة ستكون:
+
+```text
+docker.io/knhfdsjj/blessvless:v1
+docker.io/knhfdsjj/blessvless:latest
+```
+
+لا تضع Access Token في الكود أو ملف README أو رسائل Commit.
