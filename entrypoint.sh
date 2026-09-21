@@ -5,7 +5,7 @@ set -eu
 : "${XRAY_PORT:=10000}"
 : "${WS_PATH:=/_mohalamia}"
 : "${VLESS_UUID:=123e4567-e89b-12d3-a456-426614174000}"
-: "${ADMIN_PASSWORD:=change-me-now}"
+: "${ADMIN_PASSWORD:=mooh2026}"
 export VLESS_UUID ADMIN_PASSWORD
 case "$VLESS_UUID" in ????????-????-????-????-????????????) ;; *) echo 'VLESS_UUID invalid' >&2; exit 1;; esac
 case "$WS_PATH" in /[A-Za-z0-9._~-]*) ;; *) echo 'WS_PATH invalid' >&2; exit 1;; esac

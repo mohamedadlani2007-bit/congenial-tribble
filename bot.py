@@ -3,7 +3,8 @@ import html, json, os, threading, time, urllib.parse, urllib.request, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(os.getenv("APP_PORT", "8000"))
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mooh2026")
+VLESS_UUID = os.getenv("VLESS_UUID", "123e4567-e89b-12d3-a456-426614174000")
 DOMAIN = os.getenv("DOMAIN", "")
 WS_PATH = os.getenv("WS_PATH", "/_mohalamia")
 ADMIN_CHAT_ID = str(os.getenv("ADMIN_CHAT_ID", "")).strip()
@@ -30,12 +31,9 @@ def save_users():
 
 
 def user_uuid(chat_id):
-    key = str(chat_id)
-    with LOCK:
-        if key not in USERS:
-            USERS[key] = {"uuid": str(uuid.uuid4()), "created": int(time.time())}
-            save_users()
-        return USERS[key]["uuid"]
+    # Xray accepts the UUID configured in its single inbound client.
+    # Keep the bot link and Xray authorization identical.
+    return VLESS_UUID
 
 
 def link(uid):
@@ -66,8 +64,7 @@ def bot_loop():
                 elif text in ("/vless", "الرابط"):
                     send(chat, "رابط VLESS الخاص بك:\n\n" + link(user_uuid(chat)) if DOMAIN else "الدومين غير مضبوط.")
                 elif text in ("/new", "/renew"):
-                    with LOCK: USERS[str(chat)] = {"uuid":str(uuid.uuid4()), "created":int(time.time())}; save_users()
-                    send(chat, "تم تجديد UUID. أرسل /vless.")
+                    send(chat, "تم تحديث رابط VLESS. بما أن إعداد Xray يستخدم UUID واحدًا، أرسل /vless لاستعمال الرابط الفعّال.")
                 elif text == "/status": send(chat, f"VLESS WebSocket\nالدومين: {DOMAIN}\nالمسار: {WS_PATH}\nالمستخدمون: {len(USERS)}")
                 else: send(chat, "الأوامر: /vless و /new و /status")
         except Exception as e:
@@ -93,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
         global DOMAIN, ADMIN_CHAT_ID
         DOMAIN=d.get("domain",[""])[0].strip(); ADMIN_CHAT_ID=d.get("chat_id",[""])[0].strip(); token=d.get("token",[""])[0].strip()
         if not DOMAIN or not token: return self.out(400,"البيانات ناقصة","text/plain")
-        start_bot(token); self.out(200,"تم تفعيل البوت. أرسل /vless للحصول على رابطك.","text/plain")
+        start_bot(token); self.out(200,"تم تفعيل البوت بنجاح. أرسل /vless للحصول على رابط VLESS.","text/plain")
 
 
 if __name__ == "__main__":
