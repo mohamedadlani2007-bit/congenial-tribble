@@ -26,12 +26,33 @@ jobs:
           for i in $(seq 1 30); do
             if curl --silent --fail http://127.0.0.1:18080/health >/dev/null && \
                curl --silent --fail http://127.0.0.1:18080/ | grep -q 'إعداد VLESS Bot'; then
-              exit 0
+              break
             fi
             sleep 2
           done
-          docker logs blessvless-smoke
-          exit 1
+          curl --silent --fail http://127.0.0.1:18080/health >/dev/null
+          curl --silent --fail http://127.0.0.1:18080/ | grep -q 'إعداد VLESS Bot'
+
+      - name: Verify Dark Tunnel and per-user UUID logic
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, sys
+          sys.path.insert(0, '.')
+          os.environ['DOMAIN'] = 'example.run.app'
+          import bot
+          user = {'uuid': 'b60151ba-c8a0-4005-9ded-a7bb9d5ce2ad', 'name': 'smoke', 'active': True}
+          value = bot.dark_file(user)
+          assert value.startswith('darktunnel://')
+          payload = value.split('://', 1)[1]
+          payload += '=' * ((4 - len(payload) % 4) % 4)
+          decoded = json.loads(base64.urlsafe_b64decode(payload))
+          v2ray = decoded['vlessTunnelConfig']['v2rayConfig']
+          assert v2ray['uuid'] == user['uuid']
+          assert v2ray['wsPath'] == '/_mohalamia'
+          assert bot.menu()[0][0]['callback_data'] == 'create'
+          print('Dark Tunnel, UUID, and buttons: OK')
+          PY
+
       - name: Show logs on failure
         if: failure()
         run: docker logs blessvless-smoke
