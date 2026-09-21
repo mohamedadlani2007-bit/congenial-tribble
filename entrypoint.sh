@@ -6,15 +6,18 @@ set -eu
 : "${XRAY_PORT:=10000}"
 : "${WS_PATH:=/_vless}"
 
+# Cloud Run must be able to start the HTTP listener even when optional secrets
+# were not attached during the first deployment. Production deployments should
+# always provide both values through Secret Manager.
 if [ -z "${VLESS_UUID:-}" ]; then
-  echo "VLESS_UUID is required" >&2
-  exit 1
+  VLESS_UUID="$(cat /proc/sys/kernel/random/uuid)"
+  echo "WARNING: VLESS_UUID was not provided; generated an ephemeral UUID." >&2
 fi
-
 if [ -z "${ADMIN_PASSWORD:-}" ]; then
-  echo "ADMIN_PASSWORD is required" >&2
-  exit 1
+  ADMIN_PASSWORD="${SETUP_PASSWORD:-change-me-now}"
+  echo "WARNING: ADMIN_PASSWORD was not provided; use Secret Manager in production." >&2
 fi
+export VLESS_UUID ADMIN_PASSWORD
 
 case "$VLESS_UUID" in
   ????????-????-????-????-????????????) ;;

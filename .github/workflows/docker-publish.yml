@@ -9,7 +9,43 @@ permissions:
   contents: read
 
 jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build smoke-test image
+        run: docker build --tag blessvless:smoke .
+
+      - name: Start container
+        run: |
+          docker run --detach --name blessvless-smoke --publish 18080:8080 \
+            --env VLESS_UUID=123e4567-e89b-12d3-a456-426614174000 \
+            --env ADMIN_PASSWORD=test-only \
+            blessvless:smoke
+
+      - name: Verify Cloud Run listener and health endpoint
+        run: |
+          for i in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:18080/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs blessvless-smoke
+          exit 1
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs blessvless-smoke
+
+      - name: Remove smoke-test container
+        if: always()
+        run: docker rm --force blessvless-smoke || true
+
   docker:
+    needs: smoke
     environment: DOCKERHUB_TOKEN
     runs-on: ubuntu-latest
     steps:
