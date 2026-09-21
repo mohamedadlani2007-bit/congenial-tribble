@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   docker:
+    environment: DOCKERHUB_TOKEN
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
