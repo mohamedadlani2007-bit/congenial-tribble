@@ -7,6 +7,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "mooh2026")
 DOMAIN = os.getenv("DOMAIN", "")
 WS_PATH = os.getenv("WS_PATH", "/_mohalamia")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+SETUP_FILE = os.getenv("SETUP_FILE", "/tmp/vless-setup.json")
 DATA_FILE = os.getenv("USERS_FILE", "/tmp/vless-users.json")
 LOCK = threading.RLock()
 USERS = {}
@@ -14,6 +15,28 @@ BOT_THREAD = None
 XRAY_CONFIG = os.getenv("XRAY_LIVE_CONFIG", "/tmp/xray-live.json")
 XRAY_PIDFILE = os.getenv("XRAY_PIDFILE", "/tmp/xray.pid")
 BASE_CONFIG = os.getenv("XRAY_BASE_CONFIG", "/etc/xray/config.template.json")
+
+
+def load_setup():
+    global DOMAIN, BOT_TOKEN
+    try:
+        with open(SETUP_FILE, encoding="utf-8") as f:
+            saved = json.load(f)
+        DOMAIN = saved.get("domain", DOMAIN)
+        BOT_TOKEN = saved.get("token", BOT_TOKEN)
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+
+def save_setup():
+    os.makedirs(os.path.dirname(SETUP_FILE) or ".", exist_ok=True)
+    tmp = SETUP_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f: json.dump({"domain": DOMAIN, "token": BOT_TOKEN}, f)
+    os.replace(tmp, SETUP_FILE)
+
+
+def setup_done():
+    return bool(DOMAIN and BOT_TOKEN)
 
 
 def load_users():
@@ -79,6 +102,16 @@ def send(chat, text, keyboard=None):
     return api("sendMessage", p)
 
 
+def send_document(chat, filename, content, caption):
+    boundary = "----VlessBoundary7f3a"
+    chunks = [f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{chat}\r\n".encode()]
+    chunks.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n".encode())
+    chunks.append(content.encode())
+    chunks.append(f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n{caption}\r\n--{boundary}--\r\n".encode())
+    req = urllib.request.Request(f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument", data=b"".join(chunks), headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    with urllib.request.urlopen(req, timeout=35) as r: return json.loads(r.read())
+
+
 def menu():
     return [[{"text":"إنشاء / رابط جديد","callback_data":"create"},{"text":"ملف Dark Tunnel","callback_data":"file"}], [{"text":"تجديد","callback_data":"renew"},{"text":"توقيف","callback_data":"stop"}], [{"text":"تشغيل","callback_data":"start"},{"text":"حذف","callback_data":"delete"}], [{"text":"حالتي","callback_data":"status"}]]
 
@@ -97,7 +130,10 @@ def handle_action(chat, action, name="user"):
     elif action == "file":
         u = ensure_user(chat, name)
         if not u.get("active"): return send(chat, "الحساب متوقف. اضغط تشغيل أولًا.", menu())
-        send(chat, "ملف Dark Tunnel (اضغط مطولًا للنسخ):\n\n" + dark_file(u) + "\n\nVLESS:\n" + vless_link(u), menu())
+        dark = dark_file(u)
+        caption = "تم إنشاء ملف Dark Tunnel بنجاح ✅\nالمستخدم: " + u["name"] + "\nUUID: " + u["uuid"][:8] + "\nاضغط على الملف لاستيراده في التطبيق."
+        send_document(chat, "VLESS-DarkTunnel-" + u["uuid"][:8] + ".dark", dark, caption)
+        send(chat, "تم إنشاء الملف بنجاح ✅\n\nنسخة للنسخ اليدوي:\n" + dark, menu())
     elif action == "stop":
         u = ensure_user(chat, name); u["active"] = False; save_users(); sync_xray(); send(chat, "تم توقيف حسابك.", menu())
     elif action == "start":
@@ -137,19 +173,22 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code); self.send_header("Content-Type", typ); self.end_headers(); self.wfile.write(body.encode())
     def do_GET(self):
         if self.path == "/health": return self.out(200, "ok", "text/plain")
+        if setup_done(): return self.out(200, "تم الاتصال بنجاح ✅", "text/plain; charset=utf-8")
         self.out(200, f"<!doctype html><html lang='ar' dir='rtl'><meta charset='utf-8'><style>body{{font-family:Arial;max-width:560px;margin:45px auto;padding:20px;background:#f4f4f4}}main{{background:white;padding:25px;border-radius:12px}}input{{width:100%;padding:12px;margin:7px 0 15px;box-sizing:border-box}}button{{padding:12px 22px;background:#1769aa;color:white;border:0;border-radius:6px}}</style><main><h2>إعداد VLESS Bot</h2><p>بعد التفعيل أرسل /start للبوت ثم استعمل الأزرار.</p><form method='POST'><label>كلمة سر الإدارة</label><input name='password' type='password' required><label>Telegram Bot Token</label><input name='token' type='password' required><label>الدومين</label><input name='domain' value='{html.escape(DOMAIN)}' required><button>تفعيل البوت</button></form></main></html>")
     def do_POST(self):
         n=int(self.headers.get("Content-Length",0)); d=urllib.parse.parse_qs(self.rfile.read(n).decode())
         if d.get("password",[""])[0] != ADMIN_PASSWORD: return self.out(403,"كلمة السر غير صحيحة","text/plain")
         global DOMAIN, BOT_TOKEN
         DOMAIN=d.get("domain",[""])[0].strip(); BOT_TOKEN=d.get("token",[""])[0].strip()
-        if not DOMAIN or not BOT_TOKEN: return self.out(400,"البيانات ناقصة","text/plain")
+        if not DOMAIN or not BOT_TOKEN: return self.out(400,"البيانات الناقصة","text/plain")
+        save_setup()
         global BOT_THREAD
         if not BOT_THREAD or not BOT_THREAD.is_alive(): BOT_THREAD=threading.Thread(target=bot_loop, daemon=True); BOT_THREAD.start()
         self.out(200,"تم الاتصال بنجاح. افتح Telegram وأرسل /start.","text/plain")
 
 
 if __name__ == "__main__":
+    load_setup()
     os.makedirs(os.path.dirname(DATA_FILE) or ".", exist_ok=True); load_users(); sync_xray()
     if BOT_TOKEN: BOT_THREAD=threading.Thread(target=bot_loop, daemon=True); BOT_THREAD.start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

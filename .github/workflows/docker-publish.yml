@@ -32,6 +32,9 @@ jobs:
           done
           curl --silent --fail http://127.0.0.1:18080/health >/dev/null
           curl --silent --fail http://127.0.0.1:18080/ | grep -q 'إعداد VLESS Bot'
+          curl --silent --fail -X POST -d 'password=test-only&token=test-token&domain=example.run.app' http://127.0.0.1:18080/ | grep -q 'تم الاتصال بنجاح'
+          curl --silent --fail http://127.0.0.1:18080/ | grep -q 'تم الاتصال بنجاح'
+          ! curl --silent --fail http://127.0.0.1:18080/ | grep -q 'إعداد VLESS Bot'
 
       - name: Verify Dark Tunnel and per-user UUID logic
         run: |
@@ -79,6 +82,7 @@ jobs:
           tags: |
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/blessvless:v1
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/blessvless:v2
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/blessvless:v3
             docker.io/${{ secrets.DOCKERHUB_USERNAME }}/blessvless:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
