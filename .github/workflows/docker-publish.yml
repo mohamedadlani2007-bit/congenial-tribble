@@ -18,22 +18,27 @@ jobs:
       - name: Build smoke-test image
         run: docker build --tag blessvless:smoke .
 
-      - name: Start container
+      - name: Start direct VLESS container
         run: |
-          docker run --detach --name blessvless-smoke --publish 18080:8080 \
-            --env VLESS_UUID=123e4567-e89b-12d3-a456-426614174000 \
-            --env ADMIN_PASSWORD=test-only \
-            blessvless:smoke
+          docker run --detach --name blessvless-smoke --publish 18080:8080 blessvless:smoke
 
-      - name: Verify Cloud Run listener and health endpoint
+      - name: Verify V2Ray listener on port 8080
         run: |
           for i in $(seq 1 30); do
-            if curl --silent --fail http://127.0.0.1:18080/health; then
+            if curl --silent --show-error --max-time 3 \
+              --header 'Connection: Upgrade' \
+              --header 'Upgrade: websocket' \
+              http://127.0.0.1:18080/mohamedalmia >/tmp/vless-response 2>/tmp/vless-error; then
               exit 0
+            fi
+            if ! docker inspect -f '{{.State.Running}}' blessvless-smoke | grep -q true; then
+              docker logs blessvless-smoke
+              exit 1
             fi
             sleep 2
           done
           docker logs blessvless-smoke
+          cat /tmp/vless-error || true
           exit 1
 
       - name: Show container logs on failure
