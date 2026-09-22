@@ -9,6 +9,9 @@ WS_PATH = os.getenv("WS_PATH", "/_mohalamia")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 SETUP_FILE = os.getenv("SETUP_FILE", "/tmp/vless-setup.json")
 DATA_FILE = os.getenv("USERS_FILE", "/tmp/vless-users.json")
+SSH_USERNAME = os.getenv("SSH_USERNAME", "moon")
+SSH_PASSWORD = os.getenv("SSH_PASSWORD", "moon")
+SSH_WS_PATH = os.getenv("SSH_WS_PATH", "/_mohalamia")
 LOCK = threading.RLock()
 USERS = {}
 BOT_THREAD = None
@@ -113,7 +116,16 @@ def send_document(chat, filename, content, caption):
 
 
 def menu():
-    return [[{"text":"إنشاء / رابط جديد","callback_data":"create"},{"text":"ملف Dark Tunnel","callback_data":"file"}], [{"text":"تجديد","callback_data":"renew"},{"text":"توقيف","callback_data":"stop"}], [{"text":"تشغيل","callback_data":"start"},{"text":"حذف","callback_data":"delete"}], [{"text":"حالتي","callback_data":"status"}]]
+    return [[{"text":"🔐 VLESS","callback_data":"vless_menu"},{"text":"🔑 SSH","callback_data":"ssh_menu"}], [{"text":"➕ إنشاء VLESS","callback_data":"create"},{"text":"📁 ملف Dark Tunnel","callback_data":"file"}], [{"text":"🔄 تجديد VLESS","callback_data":"renew"},{"text":"📋 بيانات SSH","callback_data":"ssh_info"}], [{"text":"⏹ توقيف VLESS","callback_data":"stop"},{"text":"▶️ تشغيل VLESS","callback_data":"start"}], [{"text":"🗑 حذف VLESS","callback_data":"delete"},{"text":"📊 الحالة","callback_data":"status"}]]
+
+def ssh_info(chat, name="user"):
+    host = DOMAIN.replace("https://", "").replace("http://", "").split("/", 1)[0]
+    text = ("🔑 بيانات SSH WebSocket\n\n"
+            f"المستخدم: {SSH_USERNAME}\nكلمة المرور: {SSH_PASSWORD}\n"
+            f"Host: {host}\nPort: 443\nPath: {SSH_WS_PATH}\n"
+            "البروتوكول: SSH عبر WebSocket/TLS\n\n"
+            "استعمل زر النسخ أو انسخ البيانات يدويًا.")
+    send(chat, text, [[{"text":"📋 نسخ بيانات SSH","callback_data":"ssh_copy"},{"text":"🏠 القائمة","callback_data":"main"}]])
 
 
 def user_text(u):
@@ -122,7 +134,18 @@ def user_text(u):
 
 def handle_action(chat, action, name="user"):
     key = str(chat)
-    if action in ("create", "renew"):
+    if action == "ssh_menu":
+        send(chat, "🔑 قسم SSH\nاختر العملية المطلوبة:", [[{"text":"📋 بيانات SSH","callback_data":"ssh_info"}], [{"text":"🏠 القائمة الرئيسية","callback_data":"main"}]])
+    elif action == "vless_menu":
+        send(chat, "🔐 قسم VLESS\nأنشئ حسابًا ثم اطلب ملف Dark Tunnel.", menu())
+    elif action == "ssh_info":
+        ssh_info(chat, name)
+    elif action == "ssh_copy":
+        host = DOMAIN.replace("https://", "").replace("http://", "").split("/", 1)[0]
+        send(chat, f"SSH Host: {host}\nPort: 443\nUser: {SSH_USERNAME}\nPassword: {SSH_PASSWORD}\nPath: {SSH_WS_PATH}", menu())
+    elif action == "main":
+        send(chat, "القائمة الرئيسية:", menu())
+    elif action in ("create", "renew"):
         with LOCK:
             if action == "renew" and key in USERS: USERS[key]["uuid"] = str(uuid.uuid4())
             u = ensure_user(chat, name); u["active"] = True; save_users(); sync_xray()
@@ -161,6 +184,7 @@ def bot_loop():
                 if text in ("/start", "/help"): send(chat, "مرحبًا بك في VLESS Bot. استعمل الأزرار لإدارة حسابك وإنشاء ملف Dark Tunnel.", menu())
                 elif text in ("/file", "/dark"): handle_action(chat, "file", name)
                 elif text == "/vless": handle_action(chat, "file", name)
+                elif text == "/ssh": handle_action(chat, "ssh_info", name)
                 elif text == "/new": handle_action(chat, "create", name)
                 else: send(chat, "اختر عملية من الأزرار:", menu())
         except Exception as e:
